@@ -1,0 +1,33 @@
+{
+  "name": "Presupuestos Ágil",
+  "short_name": "Presupuestos",
+  "description": "Armá presupuestos de obra al toque, desde el celular, con precio Todo Incluido.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "id": "/presupuestos-agil",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F3F4F6",
+  "theme_color": "#2563EB",
+  "lang": "es-AR",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
