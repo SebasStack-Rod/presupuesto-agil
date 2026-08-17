@@ -196,6 +196,27 @@
     flex-direction:column;
     gap:12px;
   }
+  .btn-cargar-mas{
+    display:block;
+    width:100%;
+    margin-top:14px;
+    padding:12px;
+    min-height:46px;
+    background:var(--surface);
+    color:var(--primary);
+    border:1.5px solid var(--primary);
+    border-radius:8px;
+    font-size:14.5px;
+    font-weight:700;
+    cursor:pointer;
+  }
+  .btn-cargar-mas:hover{ background:var(--primary); color:#fff; }
+  .info-cargados{
+    text-align:center;
+    font-size:12.5px;
+    color:var(--text-muted, #888);
+    margin-top:8px;
+  }
   .item-catalogo{
     background:var(--surface);
     border-radius:8px;
@@ -747,7 +768,7 @@
   .armador-vacio .icono-vacio{ font-size:38px; margin-bottom:10px; }
 
   /* ===== HISTORIAL ===== */
-  #buscador-historial{
+  #buscador-historial, .campo-buscador{
     width:100%;
     min-height:44px;
     border:1px solid var(--border);
@@ -758,7 +779,8 @@
     color:var(--text);
     margin-bottom:14px;
   }
-  #buscador-historial:focus{ border-color:var(--primary); outline:none; }
+  #buscador-historial:focus, .campo-buscador:focus{ border-color:var(--primary); outline:none; }
+  .campo-buscador::placeholder{ color:var(--text-secondary); }
   .resumen-periodo{
     display:flex;
     gap:10px;
@@ -1164,6 +1186,8 @@
       <input type="file" id="input-restaurar" accept="application/json" onchange="importarBackup(event)">
     </div>
 
+    <input type="text" id="buscador-catalogo" class="campo-buscador" placeholder="Buscar ítem del catálogo..." oninput="renderCatalogo()">
+
     <div class="filtro-categorias" id="filtro-categorias"></div>
 
     <div id="catalogo-contenido"></div>
@@ -1177,6 +1201,7 @@
         <p>Materiales sueltos (arena, cemento, ladrillo...) para armar recetas de tus combos.</p>
       </div>
     </div>
+    <input type="text" id="buscador-insumos" class="campo-buscador" placeholder="Buscar insumo..." oninput="insumosVisibles = INSUMOS_POR_PAGINA; renderInsumos()">
     <div id="insumos-contenido"></div>
   </section>
 
@@ -2294,16 +2319,26 @@ function renderCatalogo(){
   renderFiltroCategorias();
   const cont = document.getElementById('catalogo-contenido');
 
-  const lista = categoriaActiva === 'Todas'
+  const inputBuscador = document.getElementById('buscador-catalogo');
+  const busqueda = normalizar(inputBuscador ? inputBuscador.value : '');
+
+  let lista = categoriaActiva === 'Todas'
     ? catalogo
     : catalogo.filter(i => (i.categoria || '') === categoriaActiva);
+
+  if(busqueda){
+    lista = lista.filter(i =>
+      normalizar(i.nombre).includes(busqueda) ||
+      normalizar(i.categoria || '').includes(busqueda)
+    );
+  }
 
   if(catalogo.length === 0){
     cont.innerHTML = '<div class="catalogo-vacio">Todavía no cargaste ítems. Tocá el botón + para agregar el primero.</div>';
     return;
   }
   if(lista.length === 0){
-    cont.innerHTML = '<div class="catalogo-vacio">No hay ítems en esta categoría.</div>';
+    cont.innerHTML = `<div class="catalogo-vacio">${busqueda ? 'No hay ítems que coincidan con la búsqueda.' : 'No hay ítems en esta categoría.'}</div>`;
     return;
   }
 
@@ -2440,6 +2475,9 @@ function borrarItemCatalogo(id){
 /* =========================================================
    VISTA INSUMOS BASE
 ========================================================= */
+const INSUMOS_POR_PAGINA = 10;
+let insumosVisibles = INSUMOS_POR_PAGINA;
+
 function renderInsumos(){
   const cont = document.getElementById('insumos-contenido');
 
@@ -2448,8 +2486,22 @@ function renderInsumos(){
     return;
   }
 
+  const inputBuscador = document.getElementById('buscador-insumos');
+  const busqueda = normalizar(inputBuscador ? inputBuscador.value : '');
+  const listaCompleta = busqueda
+    ? insumos.filter(ins => normalizar(ins.nombre).includes(busqueda))
+    : insumos;
+
+  if(listaCompleta.length === 0){
+    cont.innerHTML = '<div class="catalogo-vacio">No hay insumos que coincidan con la búsqueda.</div>';
+    return;
+  }
+
+  if(insumosVisibles > listaCompleta.length) insumosVisibles = listaCompleta.length;
+  const lista = listaCompleta.slice(0, insumosVisibles);
+
   let html = '<div class="catalogo-lista">';
-  insumos.forEach(ins => {
+  lista.forEach(ins => {
     html += `
       <div class="item-catalogo">
         <div class="item-cat-top">
@@ -2492,7 +2544,18 @@ function renderInsumos(){
     `;
   });
   html += '</div>';
+
+  if(insumosVisibles < listaCompleta.length){
+    html += `<button type="button" class="btn-cargar-mas" onclick="cargarMasInsumos()">Cargar más insumos (${listaCompleta.length - insumosVisibles} restantes)</button>`;
+  }
+  html += `<div class="info-cargados">Mostrando ${lista.length} de ${listaCompleta.length} insumo${listaCompleta.length === 1 ? '' : 's'}</div>`;
+
   cont.innerHTML = html;
+}
+
+function cargarMasInsumos(){
+  insumosVisibles += INSUMOS_POR_PAGINA;
+  renderInsumos();
 }
 
 function actualizarCampoInsumo(ev){
