@@ -97,6 +97,16 @@
       <input type="file" id="input-restaurar" accept="application/json" onchange="importarBackup(event)">
     </div>
 
+    <div class="ticket-input">
+      <label for="combo-quick-entry">Carga y edición rápida por texto</label>
+      <textarea id="combo-quick-entry" placeholder="Ej: Contrapiso m2 a 950&#10;Cemento Loma Negra, el nuevo precio es 12500" rows="2"></textarea>
+      <div class="hint">Un renglón por combo (<kbd>Enter</kbd> para procesar, <kbd>Shift+Enter</kbd> nueva línea) · para editar uno que ya existe: "Nombre, cambiarlo a Nuevo Nombre" o "Nombre, el nuevo precio es 1500"</div>
+      <div class="ticket-actions-row">
+        <button class="btn-generar-chico" onclick="procesarCargaCombos()">Procesar</button>
+        <button class="btn-limpiar-chico" onclick="limpiarCajaCombos()">Limpiar</button>
+      </div>
+    </div>
+
     <input type="text" id="buscador-catalogo" class="campo-buscador" placeholder="Buscar ítem del catálogo..." oninput="renderCatalogo()">
 
     <div class="filtro-categorias" id="filtro-categorias"></div>
@@ -112,6 +122,17 @@
         <p>Materiales sueltos (arena, cemento, ladrillo...) para armar recetas de tus combos.</p>
       </div>
     </div>
+
+    <div class="ticket-input">
+      <label for="insumo-quick-entry">Carga y edición rápida por texto</label>
+      <textarea id="insumo-quick-entry" placeholder="Ej: Cemento Loma Negra 50kg a 12500&#10;Arena, cambiarlo a Arena Gruesa" rows="2"></textarea>
+      <div class="hint">Un renglón por insumo (<kbd>Enter</kbd> para procesar, <kbd>Shift+Enter</kbd> nueva línea) · para editar uno que ya existe: "Nombre, cambiarlo a Nuevo Nombre" o "Nombre, el nuevo precio es 1500"</div>
+      <div class="ticket-actions-row">
+        <button class="btn-generar-chico" onclick="procesarCargaInsumos()">Procesar</button>
+        <button class="btn-limpiar-chico" onclick="limpiarCajaInsumos()">Limpiar</button>
+      </div>
+    </div>
+
     <input type="text" id="buscador-insumos" class="campo-buscador" placeholder="Buscar insumo..." oninput="insumosVisibles = INSUMOS_POR_PAGINA; renderInsumos()">
     <div id="insumos-contenido"></div>
   </section>
@@ -270,6 +291,15 @@
     <div class="modal-btns">
       <button class="btn-confirmar" style="width:100%" onclick="cerrarModalConfig()">Cerrar</button>
     </div>
+  </div>
+</div>
+
+<!-- ===== MODAL CONFIRMAR ACTUALIZACIÓN / DESAMBIGUACIÓN (Carga rápida Combos/Insumos) ===== -->
+<div class="modal-overlay centrado hidden" id="modal-confirmar-actualizacion">
+  <div class="modal-box">
+    <h2 id="mca-titulo">Confirmar actualización</h2>
+    <div id="mca-cuerpo"></div>
+    <div class="modal-btns" id="mca-btns"></div>
   </div>
 </div>
 

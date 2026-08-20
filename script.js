@@ -871,6 +871,10 @@ function cambiarVista(vista){
   document.getElementById('tab-insumos').classList.toggle('active', vista === 'insumos');
   document.getElementById('tab-historial').classList.toggle('active', vista === 'historial');
 
+  // El panel de cierre (Subtotal/Total/Generar) solo aplica a la vista Armador — en el
+  // resto ocupa espacio sin aportar nada, así que se oculta y se libera ese alto.
+  document.body.classList.toggle('sin-footer', vista !== 'armador');
+
   const fab = document.getElementById('fab-nuevo');
   fab.classList.toggle('hidden', vista !== 'catalogo' && vista !== 'insumos');
   fab.onclick = vista === 'insumos' ? abrirModalNuevoInsumo : abrirModalNuevo;
@@ -921,6 +925,16 @@ function categoriasUnicas(){
   return Array.from(set);
 }
 
+/* Color determinístico por nombre de categoría: mismo texto → siempre el mismo matiz,
+   sin necesidad de mantener un mapa manual (las categorías son texto libre, el usuario
+   puede escribir cualquier cosa desde "Otro" o crearlas nuevas desde Combos). */
+function hueDeCategoria(cat){
+  const s = normalizar(cat || '');
+  let hash = 0;
+  for(let i = 0; i < s.length; i++){ hash = (hash * 31 + s.charCodeAt(i)) >>> 0; }
+  return hash % 360;
+}
+
 function renderFiltroCategorias(){
   const cats = categoriasUnicas();
   const cont = document.getElementById('filtro-categorias');
@@ -929,7 +943,8 @@ function renderFiltroCategorias(){
 
   let html = `<button class="chip-categoria ${categoriaActiva==='Todas'?'activo':''}" onclick="filtrarCategoria('Todas')">Todas</button>`;
   cats.forEach(c => {
-    html += `<button class="chip-categoria ${categoriaActiva===c?'activo':''}" onclick="filtrarCategoria('${escapeHtml(c)}')">${escapeHtml(c)}</button>`;
+    const hue = hueDeCategoria(c);
+    html += `<button class="chip-categoria ${categoriaActiva===c?'activo':''}" style="--chip-hue:${hue}" onclick="filtrarCategoria('${escapeHtml(c)}')">${escapeHtml(c)}</button>`;
   });
   cont.innerHTML = html;
 }
@@ -981,12 +996,12 @@ function renderCatalogo(){
             <input type="text" value="${escapeHtml(item.nombre)}" data-id="${item.id}" data-campo="nombre" onblur="actualizarCampoCatalogo(event)">
             <div>
               ${conReceta ? `<span class="item-cat-badge badge-receta">🧾 con receta</span>` : ''}
-              ${item.categoria ? `<span class="item-cat-badge">${escapeHtml(item.categoria)}</span>` : ''}
+              ${item.categoria ? `<span class="item-cat-badge" style="--chip-hue:${hueDeCategoria(item.categoria)}">${escapeHtml(item.categoria)}</span>` : ''}
             </div>
           </div>
           <div class="item-cat-acciones">
             <button class="btn-fila receta" onclick="abrirModalReceta('${item.id}')" title="Editar receta">🧾</button>
-            <button class="btn-fila duplicar" onclick="duplicarItemCatalogo('${item.id}')" title="Duplicar">⧉</button>
+            <button class="btn-fila duplicar" onclick="duplicarItemCatalogo('${item.id}')" title="Duplicar">📄</button>
             <button class="btn-fila borrar" onclick="borrarItemCatalogo('${item.id}')" title="Eliminar">🗑</button>
           </div>
         </div>
@@ -1132,7 +1147,7 @@ function renderInsumos(){
             <input type="text" value="${escapeHtml(ins.nombre)}" data-id="${ins.id}" data-campo="nombre" onblur="actualizarCampoInsumo(event)">
           </div>
           <div class="item-cat-acciones">
-            <button class="btn-fila duplicar" onclick="duplicarInsumo('${ins.id}')" title="Duplicar">⧉</button>
+            <button class="btn-fila duplicar" onclick="duplicarInsumo('${ins.id}')" title="Duplicar">📄</button>
             <button class="btn-fila borrar" onclick="borrarInsumo('${ins.id}')" title="Eliminar">🗑</button>
           </div>
         </div>
@@ -1150,16 +1165,16 @@ function renderInsumos(){
           </div>
         </div>
         <div class="item-cat-campos item-cat-campos-precio">
-          <div class="item-cat-campo">
+          <div class="item-cat-campo item-cat-campo-secundario">
             <label title="Precio de la presentación tal cual se compra (ej: la bolsa, la caja)">Precio ($)</label>
             <input type="number" step="0.01" min="0" value="${ins.precio ?? 0}" data-id="${ins.id}" data-campo="precio" onblur="actualizarCampoInsumo(event)">
           </div>
-          <div class="item-cat-campo">
+          <div class="item-cat-campo item-cat-campo-secundario">
             <label title="Cuántas unidades base trae esa presentación (ej: 25 si es una bolsa de 25kg)">Cant. present.</label>
             <input type="number" step="0.01" min="0.01" value="${ins.cantidadPresentacion ?? 1}" data-id="${ins.id}" data-campo="cantidadPresentacion" onblur="actualizarCampoInsumo(event)">
           </div>
-          <div class="item-cat-campo">
-            <label title="Precio por unidad base. Se recalcula solo al cambiar Precio o Cant., pero podés pisarlo a mano">P. Unitario ($)</label>
+          <div class="item-cat-campo item-cat-campo-destacado">
+            <label title="Precio por unidad base. Se recalcula solo al cambiar Precio o Cant., pero podés pisarlo a mano">P. Unitario <span class="unidad-chip">/${escapeHtml(ins.unidad || 'u')}</span></label>
             <input type="number" step="0.01" min="0" value="${ins.precioUnitario ?? 0}" data-id="${ins.id}" data-campo="precioUnitario" onblur="actualizarCampoInsumo(event)">
           </div>
         </div>
@@ -1296,6 +1311,522 @@ function confirmarNuevoInsumo(){
 }
 
 /* =========================================================
+   CARGA Y ACTUALIZACIÓN RÁPIDA POR TEXTO — COMBOS E INSUMOS
+   Extiende la misma idea de la Carga Rápida del Armador a las secciones
+   de Combos (catálogo) e Insumos, con dos modos que conviven en la MISMA caja:
+
+   MODO CREACIÓN (no hay ninguna frase de "cambio" reconocida en el renglón):
+     "Cemento Loma Negra 50kg a 12500"       → crea insumo
+     "Contrapiso m2 a 950"                   → crea combo
+     "Pintura interior a 1200 material y 900 mano de obra en Pintura" → crea combo con categoría
+
+   MODO ACTUALIZACIÓN (el renglón contiene una frase de cambio reconocida —
+   siempre DESPUÉS del nombre del producto, nunca antes, para no confundir
+   el nombre con la orden):
+     "Cemento Loma Negra, cambiarlo a Cemento Avellaneda"
+     "Grifería FV, el nuevo precio es 8500"
+     "Perfil PVC quiero cambiar el precio a $ 1.250,50"
+
+   Cada renglón se separa SOLO por salto de línea o ";" (nunca por coma), porque
+   la coma se usa a propósito como separador natural entre "nombre del producto"
+   y "frase de cambio" en el modo actualización.
+========================================================= */
+
+/* --- Parser de números en formato argentino (punto = miles, coma = decimal) --- */
+function parsearNumeroAR(str){
+  if(str == null) return NaN;
+  let s = String(str).trim().replace(/\$/g, '').replace(/\s/g, '');
+  if(!s) return NaN;
+  const tieneComa = s.includes(',');
+  const tienePunto = s.includes('.');
+  if(tieneComa && tienePunto){
+    s = s.replace(/\./g, '').replace(',', '.');
+  }else if(tieneComa){
+    s = s.replace(',', '.');
+  }else if(tienePunto){
+    // "12.500" (punto como separador de miles, sin coma decimal) vs "12.5" (decimal real).
+    // Heurística: si el último grupo tras el punto tiene exactamente 3 dígitos, es separador de miles.
+    const partes = s.split('.');
+    if(partes.length > 1 && partes[partes.length - 1].length === 3){
+      s = s.replace(/\./g, '');
+    }
+  }
+  return parseFloat(s);
+}
+
+/* Separa el texto de las cajas de Combos/Insumos en renglones. A propósito NO separa
+   por coma ni por " y " (a diferencia de separarFragmentosCarga del Armador), porque acá
+   la coma se usa para separar "nombre del producto" de la "frase de cambio". */
+function separarFragmentosComando(texto){
+  return texto
+    .split(/\n|;/)
+    .map(f => f.trim())
+    .filter(f => f.length > 0);
+}
+
+/* --- Extractores reutilizables para el modo CREACIÓN --- */
+
+// Busca precio al final del fragmento: "a 1500", "a $1500", "$1500", "por 1500", o el
+// último número suelto. Devuelve { precio, resto } con resto = texto sin esa parte.
+function extraerPrecioDeFragmento(texto){
+  const patrones = [
+    /(?:\s+a\s+|\s+por\s+)\$?\s*([\d]{1,3}(?:\.\d{3})*(?:,\d+)?|\d+(?:[.,]\d+)?)\s*$/i,
+    /\$\s*([\d]{1,3}(?:\.\d{3})*(?:,\d+)?|\d+(?:[.,]\d+)?)\s*$/,
+    /([\d]{1,3}(?:\.\d{3})*(?:,\d+)?|\d+(?:[.,]\d+)?)\s*$/
+  ];
+  for(const re of patrones){
+    const m = texto.match(re);
+    if(m){
+      const precio = parsearNumeroAR(m[1]);
+      if(!isNaN(precio)){
+        return { precio, resto: texto.slice(0, m.index).trim() };
+      }
+    }
+  }
+  return { precio: null, resto: texto };
+}
+
+// Busca un patrón "<número><unidad>" o "<número> <unidad>" en cualquier parte del texto
+// (ej: "50kg", "25 kg", "1000 lts") para insumos con presentación (bolsa, caja, tanque...).
+// Devuelve { cantidad, unidad, resto }.
+function extraerPresentacionDeFragmento(texto){
+  const tokens = texto.split(/\s+/);
+  for(let i = 0; i < tokens.length; i++){
+    const tokenNum = tokens[i].replace(',', '.');
+    let numStr = null, unidadStr = null, consumidos = 0;
+
+    const pegado = tokenNum.match(/^(\d+(?:\.\d+)?)([a-zA-Záéíóúñ]+)$/);
+    if(pegado){
+      numStr = pegado[1]; unidadStr = pegado[2]; consumidos = 1;
+    }else if(/^\d+(\.\d+)?$/.test(tokenNum) && tokens[i + 1]){
+      numStr = tokenNum; unidadStr = tokens[i + 1]; consumidos = 2;
+    }else{
+      continue;
+    }
+
+    const norm = normalizar(unidadStr);
+    const match = UNIDADES_CARGA.find(([re]) => re.test(norm));
+    if(match){
+      const restoTokens = tokens.slice(0, i).concat(tokens.slice(i + consumidos));
+      return { cantidad: parseFloat(numStr), unidad: match[1], resto: restoTokens.join(' ').trim() };
+    }
+  }
+  return { cantidad: null, unidad: null, resto: texto };
+}
+
+// Busca una unidad SUELTA (sin cantidad pegada) en el texto, para el "unidad" del combo
+// (ej: "Contrapiso m2 a 950" → unidad m2, sin que haya un número de presentación).
+// Busca SOLO desde el final hacia atrás (la unidad va justo antes del precio, nunca
+// adelante del nombre) y siempre deja al menos una palabra como nombre — así una palabra
+// como "Instalación" que también es una unidad válida en la Carga Rápida del Armador
+// no se come el nombre de un producto que empieza así (ej. "Instalación eléctrica").
+function extraerUnidadSuelta(texto){
+  const tokens = texto.split(/\s+/).filter(Boolean);
+  if(tokens.length < 2) return { unidad: null, resto: texto };
+  for(let len = 2; len >= 1; len--){
+    if(tokens.length - len < 1) continue;
+    const candidato = tokens.slice(tokens.length - len).join(' ');
+    const norm = normalizar(candidato);
+    const match = UNIDADES_CARGA.find(([re]) => re.test(norm));
+    if(match){
+      const restoTokens = tokens.slice(0, tokens.length - len);
+      return { unidad: match[1], resto: restoTokens.join(' ').trim() };
+    }
+  }
+  return { unidad: null, resto: texto };
+}
+
+// Busca "en <categoría>" o "categoria <categoría>" al final del texto (combos).
+function extraerCategoria(texto){
+  const m = texto.match(/\b(?:categor[ií]a[:\s]+|en\s+)([a-zA-Záéíóúñ][a-zA-Záéíóúñ\s]*)$/i);
+  if(m){
+    return { categoria: capitalizar(m[1].trim()), resto: texto.slice(0, m.index).trim() };
+  }
+  return { categoria: null, resto: texto };
+}
+
+// Busca "material X ... mano de obra Y" explícito, para poder cargar los dos valores
+// del combo por separado en un solo renglón de texto.
+function extraerMaterialManoDeObra(texto){
+  const re = /material\s*\$?\s*([\d.,]+).*?mano\s*(?:de)?\s*obra\s*\$?\s*([\d.,]+)/i;
+  const m = texto.match(re);
+  if(!m) return null;
+  return {
+    material: parsearNumeroAR(m[1]),
+    manoObra: parsearNumeroAR(m[2]),
+    resto: texto.slice(0, m.index).trim()
+  };
+}
+
+/* Parsea un renglón de creación de INSUMO: nombre + unidad/presentación opcional + precio. */
+function parsearFragmentoInsumoNuevo(raw){
+  let texto = raw.trim();
+  if(!texto) return null;
+
+  const { precio, resto: r1 } = extraerPrecioDeFragmento(texto);
+  const { cantidad, unidad, resto: nombre } = extraerPresentacionDeFragmento(r1);
+
+  return {
+    nombre: capitalizar(nombre.trim()) || raw.trim(),
+    unidad: unidad || 'unidad',
+    precio: precio != null ? precio : 0,
+    cantidadPresentacion: cantidad != null ? cantidad : 1
+  };
+}
+
+/* Parsea un renglón de creación de COMBO: nombre + unidad opcional + categoría opcional +
+   material/mano de obra (juntos como precio total, o separados si se detecta el patrón). */
+function parsearFragmentoComboNuevo(raw){
+  let texto = raw.trim();
+  if(!texto) return null;
+
+  const { categoria, resto: r1 } = extraerCategoria(texto);
+
+  const separados = extraerMaterialManoDeObra(r1);
+  if(separados){
+    const { unidad, resto: nombre } = extraerUnidadSuelta(separados.resto);
+    return {
+      nombre: capitalizar(nombre.trim()) || raw.trim(),
+      material: separados.material,
+      manoObra: separados.manoObra,
+      unidad: unidad || 'unidad',
+      categoria: categoria || ''
+    };
+  }
+
+  const { precio, resto: r2 } = extraerPrecioDeFragmento(r1);
+  const { unidad, resto: nombre } = extraerUnidadSuelta(r2);
+  return {
+    nombre: capitalizar(nombre.trim()) || raw.trim(),
+    material: precio != null ? precio : 0,
+    manoObra: 0,
+    unidad: unidad || 'unidad',
+    categoria: categoria || ''
+  };
+}
+
+/* --- Aplicación real de la creación (una vez ya decidimos que corresponde crear) --- */
+function crearInsumoDesdeTexto(datos){
+  const nuevoInsumo = {
+    id: uid(),
+    nombre: datos.nombre,
+    unidad: datos.unidad,
+    precio: Math.max(0, round2(datos.precio)),
+    cantidadPresentacion: Math.max(0.01, datos.cantidadPresentacion || 1)
+  };
+  nuevoInsumo.precioUnitario = round2(nuevoInsumo.precio / nuevoInsumo.cantidadPresentacion);
+  insumos.push(nuevoInsumo);
+  guardarInsumos();
+  return nuevoInsumo;
+}
+function crearComboDesdeTexto(datos){
+  const nuevoItem = {
+    id: uid(),
+    nombre: datos.nombre,
+    material: Math.max(0, round2(datos.material)),
+    manoObra: Math.max(0, round2(datos.manoObra)),
+    categoria: datos.categoria || '',
+    unidad: datos.unidad,
+    tieneReceta: false,
+    receta: []
+  };
+  catalogo.push(nuevoItem);
+  guardarCatalogo();
+  return nuevoItem;
+}
+
+/* =========================================================
+   MOTOR DE ACTUALIZACIÓN POR LENGUAJE NATURAL
+========================================================= */
+
+/* Diccionario de sinónimos y variaciones estructurales. Cada patrón se ejecuta sobre
+   el renglón completo; lo que matchea es SIEMPRE la "frase de cambio" (nunca el nombre),
+   y el nombre del producto es todo lo que está ANTES de donde empieza esa frase.
+   Esto es lo que evita confundir "el nombre de un producto" con "la orden de ejecución":
+   la orden siempre se reconoce por su propia forma fija, no por estar al final del texto. */
+const PATRONES_ACTUALIZAR = [
+  // --- Cambio de NOMBRE ---
+  { tipo: 'nombre', re: /\bcambi(?:arlo|alo|elo)\s+a\s+(.+)$/i },
+  { tipo: 'nombre', re: /\bquiero\s+cambiar(?:le)?\s+el\s+nombre\s+a\s+(.+)$/i },
+  { tipo: 'nombre', re: /\bcambiar(?:le)?\s+el\s+nombre\s+a\s+(.+)$/i },
+  { tipo: 'nombre', re: /\bel\s+otro\s+nombre\s+es\s+(.+)$/i },
+  { tipo: 'nombre', re: /\bel\s+nuevo\s+nombre\s+es\s+(.+)$/i },
+  { tipo: 'nombre', re: /\brenombra(?:r|lo)?\s+a\s+(.+)$/i },
+  { tipo: 'nombre', re: /\bpasalo\s+a\s+llamarse\s+(.+)$/i },
+  { tipo: 'nombre', re: /\bque\s+se\s+llame\s+(.+)$/i },
+  { tipo: 'nombre', re: /\bponele\s+de\s+nombre\s+(.+)$/i },
+  { tipo: 'nombre', re: /\bnombre\s+nuevo\s*:?\s+(.+)$/i },
+
+  // --- Cambio de PRECIO ---
+  { tipo: 'precio', re: /\bquiero\s+cambiar(?:le)?\s+el\s+precio\s+a\s*\$?\s*([\d.,]+)/i },
+  { tipo: 'precio', re: /\bcambiar(?:le)?\s+el\s+precio\s+a\s*\$?\s*([\d.,]+)/i },
+  { tipo: 'precio', re: /\bcambio\s+el\s+precio\s+a\s*\$?\s*([\d.,]+)/i },
+  { tipo: 'precio', re: /\bel\s+nuevo\s+precio\s+es\s*\$?\s*([\d.,]+)/i },
+  { tipo: 'precio', re: /\bprecio\s+nuevo\s*:?\s*\$?\s*([\d.,]+)/i },
+  { tipo: 'precio', re: /\bactualiza(?:r|le)?\s+el\s+precio\s+a\s*\$?\s*([\d.,]+)/i },
+  { tipo: 'precio', re: /\bsubile\s+el\s+precio\s+a\s*\$?\s*([\d.,]+)/i },
+  { tipo: 'precio', re: /\bbajale\s+el\s+precio\s+a\s*\$?\s*([\d.,]+)/i },
+  { tipo: 'precio', re: /\bahora\s+vale\s*\$?\s*([\d.,]+)/i },
+  { tipo: 'precio', re: /\bahora\s+cuesta\s*\$?\s*([\d.,]+)/i },
+  { tipo: 'precio', re: /\bponele\s*\$?\s*([\d.,]+)\s*$/i },
+];
+
+/* Corre TODOS los patrones sobre el texto y se queda con el que aparece MÁS TEMPRANO
+   (menor índice) — así, si por algún texto raro matchean dos, gana el que respeta el
+   orden real "nombre primero, cambio después". Devuelve null si no reconoce ningún
+   patrón (→ el renglón se trata como creación, no como actualización). */
+function detectarComandoActualizacion(texto){
+  let mejor = null;
+  PATRONES_ACTUALIZAR.forEach(p => {
+    const m = texto.match(p.re);
+    if(m && (mejor === null || m.index < mejor.index)){
+      mejor = { index: m.index, tipo: p.tipo, valorCrudo: m[1] };
+    }
+  });
+  if(!mejor) return null;
+
+  const nombreCandidato = texto.slice(0, mejor.index).trim().replace(/[,;:\-–]+$/, '').trim();
+  let valor = mejor.valorCrudo.trim().replace(/[.\s]+$/, '');
+  if(mejor.tipo === 'precio') valor = parsearNumeroAR(valor);
+  else valor = capitalizar(valor);
+
+  return { tipo: mejor.tipo, nombreCandidato, valor };
+}
+
+/* Aplica el cambio ya confirmado sobre el producto encontrado (combo o insumo). */
+function aplicarActualizacion(candidato, cmd){
+  const { tipo: tipoProducto, item } = candidato;
+  const nombreAnterior = item.nombre;
+
+  if(cmd.tipo === 'nombre'){
+    item.nombre = cmd.valor;
+  }else{
+    if(tipoProducto === 'insumo'){
+      // Los insumos guardan "precio de presentación" + "cantidadPresentacion" → precioUnitario.
+      // Un cambio de "precio" por texto libre se interpreta como el precio de la presentación
+      // completa (lo que el usuario ve en la góndola/factura), respetando la cantidad ya cargada.
+      item.precio = Math.max(0, round2(cmd.valor));
+      const cant = Number(item.cantidadPresentacion) || 1;
+      item.precioUnitario = round2(item.precio / cant);
+    }else{
+      item.material = Math.max(0, round2(cmd.valor));
+    }
+  }
+
+  if(tipoProducto === 'catalogo'){
+    guardarCatalogo();
+    if(!document.getElementById('vista-catalogo').classList.contains('hidden')) renderCatalogo();
+  }else{
+    guardarInsumos();
+    if(!document.getElementById('vista-insumos').classList.contains('hidden')) renderInsumos();
+    if(cmd.tipo === 'precio' && config.preciosInfluyenCombos) recalcularCombosPorInsumo(item.id);
+  }
+
+  const descCambio = cmd.tipo === 'nombre'
+    ? `nombre → "${item.nombre}"`
+    : `precio → ${money(cmd.tipo === 'precio' ? (tipoProducto === 'insumo' ? item.precio : item.material) : 0)}`;
+  mostrarToast(`"${nombreAnterior}" actualizado (${descCambio}) ✓`);
+}
+
+/* --- Estado + UI del modal de confirmación / desambiguación --- */
+let actualizacionPendiente = null; // { candidatos, cmd, seleccionado }
+
+function pedirConfirmacionActualizacion(candidato, cmd){
+  actualizacionPendiente = { candidatos: [candidato], cmd, seleccionado: candidato };
+  const etiquetaTipo = candidato.tipo === 'insumo' ? 'Insumo' : 'Combo';
+  const cambio = cmd.tipo === 'nombre'
+    ? `nombre nuevo: <b>${escapeHtml(cmd.valor)}</b>`
+    : `precio nuevo: <b>${escapeHtml(money(cmd.valor))}</b>`;
+
+  document.getElementById('mca-titulo').textContent = 'Confirmar actualización';
+  document.getElementById('mca-cuerpo').innerHTML = `
+    <p>${etiquetaTipo}: <b>${escapeHtml(candidato.item.nombre)}</b></p>
+    <p>${cambio}</p>
+  `;
+  document.getElementById('mca-btns').innerHTML = `
+    <button class="btn-cancelar" onclick="cancelarActualizacionPendiente()">Cancelar</button>
+    <button class="btn-confirmar" onclick="confirmarActualizacionPendiente()">Confirmar</button>
+  `;
+  document.getElementById('modal-confirmar-actualizacion').classList.remove('hidden');
+}
+
+function abrirDesambiguacionActualizacion(candidatos, cmd, textoOriginal){
+  actualizacionPendiente = { candidatos, cmd, seleccionado: null };
+  const cambio = cmd.tipo === 'nombre'
+    ? `nombre nuevo: <b>${escapeHtml(cmd.valor)}</b>`
+    : `precio nuevo: <b>${escapeHtml(money(cmd.valor))}</b>`;
+
+  document.getElementById('mca-titulo').textContent = 'No estoy seguro a cuál te referís';
+  let html = `<p>Encontré varios productos parecidos a "<b>${escapeHtml(cmd.nombreCandidato)}</b>" (${cambio}). Elegí el correcto:</p>`;
+  html += '<div class="lista-candidatos-update">';
+  candidatos.forEach((c, i) => {
+    const etiquetaTipo = c.tipo === 'insumo' ? 'Insumo' : 'Combo';
+    html += `<button type="button" class="btn-candidato-update" onclick="seleccionarCandidatoDesambiguacion(${i})">${escapeHtml(c.item.nombre)} <span class="candidato-tag">${etiquetaTipo}</span></button>`;
+  });
+  html += '</div>';
+  document.getElementById('mca-cuerpo').innerHTML = html;
+  document.getElementById('mca-btns').innerHTML = `
+    <button class="btn-cancelar" style="width:100%" onclick="cancelarActualizacionPendiente()">Ninguno de estos / cancelar</button>
+  `;
+  document.getElementById('modal-confirmar-actualizacion').classList.remove('hidden');
+}
+
+function seleccionarCandidatoDesambiguacion(i){
+  if(!actualizacionPendiente) return;
+  const candidato = actualizacionPendiente.candidatos[i];
+  pedirConfirmacionActualizacion(candidato, actualizacionPendiente.cmd);
+}
+
+function confirmarActualizacionPendiente(){
+  if(!actualizacionPendiente || !actualizacionPendiente.seleccionado) return;
+  aplicarActualizacion(actualizacionPendiente.seleccionado, actualizacionPendiente.cmd);
+  cancelarActualizacionPendiente();
+}
+function cancelarActualizacionPendiente(){
+  actualizacionPendiente = null;
+  duplicadoPendiente = null;
+  document.getElementById('modal-confirmar-actualizacion').classList.add('hidden');
+}
+
+/* Confirmación previa a CREAR, cuando ya existe un producto muy parecido — evita
+   duplicados por error (ej. escribir de nuevo "Cemento Loma Negra a 13000" sin darse
+   cuenta de que ya existe, en vez de haber usado el modo actualización). */
+let duplicadoPendiente = null; // { tipoProducto, datos }
+
+function pedirConfirmacionCreacionDuplicada(tipoProducto, datos, candidato){
+  actualizacionPendiente = null; // este flujo no reusa la confirmación de "update", arma la suya
+  duplicadoPendiente = { tipoProducto, datos };
+  document.getElementById('mca-titulo').textContent = 'Ya existe algo parecido';
+  document.getElementById('mca-cuerpo').innerHTML = `
+    <p>Ya tenés ${candidato.tipo === 'insumo' ? 'un insumo' : 'un combo'} llamado <b>${escapeHtml(candidato.item.nombre)}</b>.</p>
+    <p>¿Querés crear "<b>${escapeHtml(datos.nombre)}</b>" como uno nuevo de todas formas, o preferís cancelarlo y actualizar el existente a mano?</p>
+  `;
+  document.getElementById('mca-btns').innerHTML = `
+    <button class="btn-cancelar" onclick="cancelarActualizacionPendiente()">Cancelar</button>
+    <button class="btn-confirmar" onclick="confirmarCreacionDuplicada()">Crear igual</button>
+  `;
+  document.getElementById('modal-confirmar-actualizacion').classList.remove('hidden');
+}
+function confirmarCreacionDuplicada(){
+  if(!duplicadoPendiente) return;
+  const { tipoProducto, datos } = duplicadoPendiente;
+  if(tipoProducto === 'insumo'){
+    crearInsumoDesdeTexto(datos);
+    renderInsumos();
+  }else{
+    crearComboDesdeTexto(datos);
+    renderCatalogo();
+  }
+  mostrarToast(`"${datos.nombre}" creado ✓`);
+  duplicadoPendiente = null;
+  cancelarActualizacionPendiente();
+}
+
+/* --- Orquestación: un renglón de texto → ¿actualización o creación? --- */
+
+// tipoVista: 'insumo' | 'combo'. Hace efecto directo (crea/actualiza/pide confirmación/avisa
+// error) y devuelve 'ok' (reconocido: creó, o abrió una confirmación/desambiguación porque
+// encontró candidatos) o 'warn' (no se entendió nada) — se usa para el flash de feedback.
+function procesarComandoProducto(fragmentoRaw, tipoVista){
+  const texto = fragmentoRaw.trim();
+  if(!texto) return 'ok';
+
+  const cmd = detectarComandoActualizacion(texto);
+
+  if(cmd){
+    // MODO ACTUALIZACIÓN: se reconoció una frase de cambio. A partir de acá el renglón
+    // NUNCA se interpreta como creación, aunque no encontremos el producto — así no se
+    // termina creando basura como un ítem llamado "Cemento cambiarlo a Portland".
+    if(!cmd.nombreCandidato){
+      mostrarToast(`No entendí a qué producto te referís antes de "${texto}"`);
+      return 'warn';
+    }
+    if(cmd.tipo === 'precio' && isNaN(cmd.valor)){
+      mostrarToast(`No pude leer el precio nuevo en: "${texto}"`);
+      return 'warn';
+    }
+
+    const candidatos = buscarCoincidenciasProducto(cmd.nombreCandidato, 25);
+    if(candidatos.length === 0){
+      mostrarToast(`No encontré ningún producto llamado "${cmd.nombreCandidato}"`);
+      return 'warn';
+    }
+
+    const mejor = candidatos[0];
+    const empatados = candidatos.filter(c => c.score === mejor.score);
+
+    if(mejor.score >= 70 && empatados.length === 1){
+      pedirConfirmacionActualizacion(mejor, cmd);
+    }else{
+      abrirDesambiguacionActualizacion(candidatos.slice(0, 5), cmd);
+    }
+    return 'ok';
+  }
+
+  // MODO CREACIÓN: no había frase de cambio reconocida en el renglón.
+  if(tipoVista === 'insumo'){
+    const datos = parsearFragmentoInsumoNuevo(texto);
+    if(!datos || !datos.nombre) return 'warn';
+    const posibleDup = buscarCoincidenciasProducto(datos.nombre, 70)[0];
+    if(posibleDup){
+      pedirConfirmacionCreacionDuplicada('insumo', datos, posibleDup);
+    }else{
+      crearInsumoDesdeTexto(datos);
+      mostrarToast(`"${datos.nombre}" creado ✓`);
+    }
+    return 'ok';
+  }else{
+    const datos = parsearFragmentoComboNuevo(texto);
+    if(!datos || !datos.nombre) return 'warn';
+    const posibleDup = buscarCoincidenciasProducto(datos.nombre, 70)[0];
+    if(posibleDup){
+      pedirConfirmacionCreacionDuplicada('combo', datos, posibleDup);
+    }else{
+      crearComboDesdeTexto(datos);
+      mostrarToast(`"${datos.nombre}" creado ✓`);
+    }
+    return 'ok';
+  }
+}
+
+function procesarCargaInsumos(){
+  const textarea = document.getElementById('insumo-quick-entry');
+  const texto = textarea.value.trim();
+  if(!texto) return;
+  const resultados = separarFragmentosComando(texto).map(f => procesarComandoProducto(f, 'insumo'));
+  flashearCaja(textarea.closest('.ticket-input'), resultados.every(r => r === 'ok'));
+  textarea.value = '';
+  renderInsumos();
+}
+function limpiarCajaInsumos(){
+  const textarea = document.getElementById('insumo-quick-entry');
+  textarea.value = '';
+  textarea.focus();
+}
+
+function procesarCargaCombos(){
+  const textarea = document.getElementById('combo-quick-entry');
+  const texto = textarea.value.trim();
+  if(!texto) return;
+  const resultados = separarFragmentosComando(texto).map(f => procesarComandoProducto(f, 'combo'));
+  flashearCaja(textarea.closest('.ticket-input'), resultados.every(r => r === 'ok'));
+  textarea.value = '';
+  renderCatalogo();
+}
+function limpiarCajaCombos(){
+  const textarea = document.getElementById('combo-quick-entry');
+  textarea.value = '';
+  textarea.focus();
+}
+
+document.getElementById('insumo-quick-entry').addEventListener('keydown', function(e){
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); procesarCargaInsumos(); }
+});
+document.getElementById('combo-quick-entry').addEventListener('keydown', function(e){
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); procesarCargaCombos(); }
+});
+
+/* =========================================================
    MODAL EDITAR RECETA
 ========================================================= */
 function abrirModalReceta(itemId){
@@ -1339,7 +1870,7 @@ function renderFilasReceta(){
           </select>
           <input type="number" min="0" step="0.01" value="${fila.cantidad}" oninput="actualizarFilaReceta(${idx}, 'cantidad', this.value)">
           <span class="unidad-receta">${unidadTxt}</span>
-          <button class="btn-quitar-ingrediente" onclick="quitarFilaReceta(${idx})" title="Quitar">✕</button>
+          <button class="btn-quitar-ingrediente" onclick="quitarFilaReceta(${idx})" title="Quitar">❌</button>
         </div>
       `;
     }).join('');
@@ -1654,30 +2185,52 @@ function parsearFragmentoCarga(raw){
 /* Matchea el concepto libre contra el catálogo (combos) Y los insumos base,
    con un puntaje simple por coincidencia exacta / inclusión / tokens en común.
    Reusa la misma normalización (sin acentos) que ya usa el resto de la app. */
+/* Puntaje de coincidencia entre un texto libre y el nombre de un producto ya cargado.
+   Compartido por: matching de la Carga Rápida del Armador, Creación rápida de Combos/Insumos
+   (para detectar duplicados) y el Motor de Actualización por Lenguaje Natural. */
+function puntuarCoincidenciaNombre(textoLibre, nombreProducto){
+  const normLibre = normalizar(textoLibre);
+  const normProducto = normalizar(nombreProducto);
+  if(!normLibre || !normProducto) return 0;
+  if(normLibre === normProducto) return 100;
+  if(normLibre.includes(normProducto) || normProducto.includes(normLibre)) return 70;
+  const tokensLibre = normLibre.split(/\s+/).filter(t => t.length > 2);
+  const tokensProducto = normProducto.split(/\s+/);
+  return tokensLibre.filter(t => tokensProducto.includes(t)).length * 25;
+}
+
 function buscarConceptoEnDatos(concepto){
-  const normConcepto = normalizar(concepto);
-  const tokensConcepto = normConcepto.split(/\s+/).filter(t => t.length > 2);
-
-  function puntuar(nombre){
-    const normNombre = normalizar(nombre);
-    if(normConcepto === normNombre) return 100;
-    if(normConcepto.includes(normNombre) || normNombre.includes(normConcepto)) return 70;
-    const tokensNombre = normNombre.split(/\s+/);
-    return tokensConcepto.filter(t => tokensNombre.includes(t)).length * 25;
-  }
-
   let mejor = null, mejorScore = 0, mejorTipo = null;
 
   catalogo.forEach(item => {
-    const score = puntuar(item.nombre);
+    const score = puntuarCoincidenciaNombre(concepto, item.nombre);
     if(score > mejorScore){ mejorScore = score; mejor = item; mejorTipo = 'catalogo'; }
   });
   insumos.forEach(ins => {
-    const score = puntuar(ins.nombre);
+    const score = puntuarCoincidenciaNombre(concepto, ins.nombre);
     if(score > mejorScore){ mejorScore = score; mejor = ins; mejorTipo = 'insumo'; }
   });
 
   return mejorScore >= 25 ? { tipo: mejorTipo, item: mejor } : null;
+}
+
+/* Devuelve TODOS los productos (catálogo + insumos) que igualan o superan minScore,
+   ordenados de mejor a peor coincidencia. Usado por el motor de actualización, donde
+   necesitamos saber si hay ambigüedad (varios candidatos con score similar) y no solo
+   "el mejor". */
+function buscarCoincidenciasProducto(textoLibre, minScore){
+  minScore = minScore == null ? 1 : minScore;
+  const resultados = [];
+  catalogo.forEach(item => {
+    const score = puntuarCoincidenciaNombre(textoLibre, item.nombre);
+    if(score >= minScore) resultados.push({ tipo: 'catalogo', item, score });
+  });
+  insumos.forEach(ins => {
+    const score = puntuarCoincidenciaNombre(textoLibre, ins.nombre);
+    if(score >= minScore) resultados.push({ tipo: 'insumo', item: ins, score });
+  });
+  resultados.sort((a, b) => b.score - a.score);
+  return resultados;
 }
 
 function capitalizar(str){
@@ -1768,20 +2321,34 @@ function agregarRenglonLibre(nombre, cantidad, unidad, textoOriginal){
 }
 
 /* Procesa UN fragmento ya separado del texto: parsea, matchea, y agrega el renglón
-   correspondiente (silencioso = no re-renderiza todavía, se hace una sola vez al final). */
+   correspondiente (silencioso = no re-renderiza todavía, se hace una sola vez al final).
+   Devuelve true si matcheó contra catálogo/insumos, false si quedó como renglón libre
+   (sin precio) — se usa para el flash verde/ámbar de feedback inmediato. */
 function procesarFragmentoCarga(fragmentoRaw){
   const parsed = parsearFragmentoCarga(fragmentoRaw);
-  if(!parsed) return;
+  if(!parsed) return true; // fragmento vacío/ignorado, no cuenta como "no reconocido"
 
   const match = buscarConceptoEnDatos(parsed.concepto);
 
   if(match && match.tipo === 'catalogo'){
     agregarTarjeta(match.item.id, parsed.cantidad, { textoOriginal: fragmentoRaw, silencioso: true });
+    return true;
   }else if(match && match.tipo === 'insumo'){
     agregarTarjetaInsumo(match.item.id, parsed.cantidad, { textoOriginal: fragmentoRaw, silencioso: true });
+    return true;
   }else{
     agregarRenglonLibre(parsed.concepto, parsed.cantidad, parsed.unidad || 'unidad', fragmentoRaw);
+    return false;
   }
+}
+
+/* Flashea un contenedor en verde (ok) o ámbar (atención) — reinicia la animación aunque
+   ya esté corriendo, para que cargas seguidas siempre den feedback visible. */
+function flashearCaja(el, ok){
+  if(!el) return;
+  el.classList.remove('flash-ok', 'flash-warn');
+  void el.offsetWidth;
+  el.classList.add(ok ? 'flash-ok' : 'flash-warn');
 }
 
 /* Punto de entrada del botón "Procesar" / tecla Enter en la caja de texto. */
@@ -1790,7 +2357,9 @@ function procesarCargaRapida(){
   const texto = textarea.value.trim();
   if(!texto) return;
 
-  separarFragmentosCarga(texto).forEach(procesarFragmentoCarga);
+  const resultados = separarFragmentosCarga(texto).map(procesarFragmentoCarga);
+  const todoMatcheo = resultados.length > 0 && resultados.every(Boolean);
+  flashearCaja(textarea.closest('.ticket-input'), todoMatcheo);
 
   textarea.value = '';
   renderTarjetas();
@@ -2341,6 +2910,35 @@ guardarConfig();
 renderTarjetas();
 mostrarOnboardingSiCorresponde();
 mostrarTooltipModoClienteSiCorresponde();
+
+/* =========================================================
+   FAB: ocultar/achicar al scrollear hacia abajo (no tapar contenido)
+========================================================= */
+(function(){
+  const fab = document.getElementById('fab-nuevo');
+  let ultimoScrollY = window.scrollY;
+  let ticking = false;
+
+  function actualizarFab(){
+    const actual = window.scrollY;
+    const bajando = actual > ultimoScrollY + 4;
+    const subiendo = actual < ultimoScrollY - 4;
+    if(bajando && actual > 80){
+      fab.classList.add('fab-oculto');
+    }else if(subiendo || actual < 80){
+      fab.classList.remove('fab-oculto');
+    }
+    ultimoScrollY = actual;
+    ticking = false;
+  }
+
+  window.addEventListener('scroll', function(){
+    if(!ticking){
+      requestAnimationFrame(actualizarFab);
+      ticking = true;
+    }
+  }, { passive: true });
+})();
 
 /* Registro del Service Worker: hace la app instalable ("Agregar a pantalla de inicio")
    y disponible offline. Es aditivo — si falla (ej: abierta como file:// sin servidor,
