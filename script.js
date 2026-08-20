@@ -875,10 +875,6 @@ function cambiarVista(vista){
   // resto ocupa espacio sin aportar nada, así que se oculta y se libera ese alto.
   document.body.classList.toggle('sin-footer', vista !== 'armador');
 
-  const fab = document.getElementById('fab-nuevo');
-  fab.classList.toggle('hidden', vista !== 'catalogo' && vista !== 'insumos');
-  fab.onclick = vista === 'insumos' ? abrirModalNuevoInsumo : abrirModalNuevo;
-
   if(vista === 'catalogo') renderCatalogo();
   if(vista === 'insumos') renderInsumos();
   if(vista === 'armador') renderTarjetas();
@@ -1965,6 +1961,252 @@ function confirmarNuevoItem(){
 }
 
 /* Exportar / Restaurar backup COMPLETO: catálogo + presupuesto en curso + cliente/obra + historial */
+/* =========================================================
+   IMPORTAR / EXPORTAR INSUMOS DESDE EXCEL (formato CSV)
+   Se usa CSV (no .xlsx binario) porque lo abre y guarda Excel/Google
+   Sheets sin instalar nada, funciona 100% offline (no depende de
+   ninguna librería externa) y es liviano. Convención pensada para
+   Excel en español: separador ";" y decimales con ",", con BOM UTF-8
+   para que tildes y "ñ" se vean bien al abrirlo.
+========================================================= */
+const CSV_COLUMNAS_INSUMOS = ['Nombre', 'Unidad', 'Precio', 'Cantidad Presentación', 'Precio Unitario (referencia, se recalcula solo)'];
+
+function formatearNumeroCSV(n){
+  // Decimales con coma, como espera Excel en configuración regional Argentina.
+  return round2(n).toString().replace('.', ',');
+}
+
+function csvEscaparCampo(valor){
+  const str = String(valor == null ? '' : valor);
+  if(/[;,"\n]/.test(str)){
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
+function exportarInsumosExcel(){
+  const filas = [CSV_COLUMNAS_INSUMOS.map(csvEscaparCampo).join(';')];
+  insumos.forEach(ins => {
+    filas.push([
+      csvEscaparCampo(ins.nombre),
+      csvEscaparCampo(etiquetaUnidad(ins.unidad)),
+      formatearNumeroCSV(ins.precio),
+      formatearNumeroCSV(ins.cantidadPresentacion),
+      formatearNumeroCSV(ins.precioUnitario)
+    ].join(';'));
+  });
+  const contenido = '\uFEFF' + filas.join('\r\n'); // BOM al inicio: tildes/ñ bien en Excel
+  const blob = new Blob([contenido], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'insumos-' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  mostrarToast(`Exportado: ${insumos.length} insumo${insumos.length === 1 ? '' : 's'} ✓`);
+}
+
+/* Convierte un número escrito como texto, tolerando los formatos más comunes
+   con los que Excel puede guardar un CSV: "12500.5", "12500,5", "12.500,50"
+   (miles con punto, decimales con coma) o "12,500.50" (al revés, formato US). */
+function parseNumeroFlexible(str){
+  if(str == null) return 0;
+  let s = String(str).trim().replace(/\s/g, '').replace(/[$]/g, '');
+  if(!s) return 0;
+  const tienePunto = s.includes('.');
+  const tieneComa = s.includes(',');
+  if(tienePunto && tieneComa){
+    // El separador que aparece último es el decimal; el otro son miles y se descarta.
+    if(s.lastIndexOf(',') > s.lastIndexOf('.')){
+      s = s.replace(/\./g, '').replace(',', '.');
+    }else{
+      s = s.replace(/,/g, '');
+    }
+  }else if(tieneComa){
+    const digitosTrasComa = s.length - s.lastIndexOf(',') - 1;
+    s = digitosTrasComa === 3 ? s.replace(/,/g, '') : s.replace(',', '.');
+  }else if(tienePunto){
+    const digitosTrasPunto = s.length - s.lastIndexOf('.') - 1;
+    if(digitosTrasPunto === 3) s = s.replace(/\./g, '');
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+function unidadDesdeTextoCSV(texto){
+  const t = normalizar(texto);
+  if(['kg','kilo','kilos','kilogramo','kilogramos'].includes(t)) return 'kg';
+  if(['l','lt','lts','litro','litros'].includes(t)) return 'l';
+  if(['m2','m²','metro2','metros2','metro cuadrado','metros cuadrados'].includes(t)) return 'm2';
+  if(['m3','m³','metro3','metros3','metro cubico','metros cubicos'].includes(t)) return 'm3';
+  if(['m','mt','metro','metros'].includes(t)) return 'm';
+  return 'unidad';
+}
+
+/* Parser CSV simple con soporte de comillas y detección automática de separador
+   (";" — Excel en español — o "," — Excel en inglés/Google Sheets). */
+function parsearCSV(texto){
+  const limpio = texto.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lineas = limpio.split('\n').filter(l => l.trim() !== '');
+  if(lineas.length === 0) return { filas: [] };
+
+  const muestraCabecera = lineas[0];
+  const cantPuntoYComa = (muestraCabecera.match(/;/g) || []).length;
+  const cantComa = (muestraCabecera.match(/,/g) || []).length;
+  const separador = cantPuntoYComa >= cantComa ? ';' : ',';
+
+  function parsearLinea(linea){
+    const campos = [];
+    let actual = '';
+    let entreComillas = false;
+    for(let i = 0; i < linea.length; i++){
+      const c = linea[i];
+      if(entreComillas){
+        if(c === '"'){
+          if(linea[i+1] === '"'){ actual += '"'; i++; }
+          else entreComillas = false;
+        }else actual += c;
+      }else{
+        if(c === '"') entreComillas = true;
+        else if(c === separador){ campos.push(actual); actual = ''; }
+        else actual += c;
+      }
+    }
+    campos.push(actual);
+    return campos.map(c => c.trim());
+  }
+
+  return { filas: lineas.map(parsearLinea) };
+}
+
+/* Estado temporal mientras se revisa un import antes de confirmarlo */
+let importInsumosPendiente = null; // { nuevos: [...], actualizados: [...] }
+
+function importarInsumosExcel(event){
+  const file = event.target.files[0];
+  event.target.value = ''; // permite volver a elegir el mismo archivo después
+  if(!file) return;
+
+  if(/\.(xlsx|xls)$/i.test(file.name)){
+    alert('Ese archivo es un Excel binario (.xlsx). Abrilo en Excel y hacé "Archivo > Guardar como" eligiendo el formato CSV (delimitado por comas), y subí ese archivo.');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const { filas } = parsearCSV(String(e.target.result));
+      if(filas.length < 2){
+        alert('El archivo no tiene filas de datos para importar.');
+        return;
+      }
+      const filasDatos = filas.slice(1); // saltea la cabecera
+
+      const nuevos = [];
+      const actualizados = [];
+
+      filasDatos.forEach(fila => {
+        const nombre = (fila[0] || '').trim();
+        if(!nombre) return;
+        const unidad = unidadDesdeTextoCSV(fila[1]);
+        const precio = Math.max(0, round2(parseNumeroFlexible(fila[2])));
+        const cantidadPresentacion = Math.max(0.01, parseNumeroFlexible(fila[3]) || 1);
+        const precioUnitario = round2(precio / cantidadPresentacion);
+
+        const existente = insumos.find(i => normalizar(i.nombre) === normalizar(nombre));
+        if(existente){
+          const cambios = [];
+          if(existente.unidad !== unidad) cambios.push({ campo:'Unidad', antes: etiquetaUnidad(existente.unidad), despues: etiquetaUnidad(unidad) });
+          if(round2(existente.precio) !== precio) cambios.push({ campo:'Precio', antes: money(existente.precio), despues: money(precio) });
+          if(round2(existente.cantidadPresentacion) !== round2(cantidadPresentacion)) cambios.push({ campo:'Cant. presentación', antes: existente.cantidadPresentacion, despues: cantidadPresentacion });
+          if(cambios.length > 0){
+            actualizados.push({ id: existente.id, nombre: existente.nombre, unidad, precio, cantidadPresentacion, precioUnitario, cambios });
+          }
+        }else{
+          nuevos.push({ nombre, unidad, precio, cantidadPresentacion, precioUnitario });
+        }
+      });
+
+      if(nuevos.length === 0 && actualizados.length === 0){
+        mostrarToast('No hay cambios: el Excel ya coincide con lo que tenés cargado.');
+        return;
+      }
+
+      importInsumosPendiente = { nuevos, actualizados };
+      mostrarResumenImportInsumos(nuevos, actualizados);
+    }catch(err){
+      alert('No pude leer ese archivo como CSV. Revisá que se haya guardado en ese formato.');
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function mostrarResumenImportInsumos(nuevos, actualizados){
+  document.getElementById('mca-titulo').textContent = 'Confirmar importación de Excel';
+
+  let html = `<div class="resumen-import-contadores">`;
+  if(nuevos.length) html += `<span class="resumen-import-chip chip-nuevo">${nuevos.length} nuevo${nuevos.length === 1 ? '' : 's'}</span>`;
+  if(actualizados.length) html += `<span class="resumen-import-chip chip-actualizado">${actualizados.length} actualizado${actualizados.length === 1 ? '' : 's'}</span>`;
+  html += `</div>`;
+
+  html += '<div class="lista-cambios-import">';
+  nuevos.forEach(n => {
+    html += `<div class="fila-cambio-import fci-nuevo">
+      <div class="fci-nombre">${escapeHtml(n.nombre)}</div>
+      <div class="fci-detalle">Nuevo insumo — ${money(n.precio)} / ${etiquetaUnidad(n.unidad)}</div>
+    </div>`;
+  });
+  actualizados.forEach(a => {
+    const detalle = a.cambios.map(c => `${c.campo}: ${escapeHtml(String(c.antes))} → <b>${escapeHtml(String(c.despues))}</b>`).join(' · ');
+    html += `<div class="fila-cambio-import fci-actualizado">
+      <div class="fci-nombre">${escapeHtml(a.nombre)}</div>
+      <div class="fci-detalle">${detalle}</div>
+    </div>`;
+  });
+  html += '</div>';
+
+  document.getElementById('mca-cuerpo').innerHTML = html;
+  document.getElementById('mca-btns').innerHTML = `
+    <button class="btn-cancelar" onclick="cancelarImportInsumos()">Cancelar</button>
+    <button class="btn-confirmar" onclick="confirmarImportInsumos()">Confirmar importación</button>
+  `;
+  document.getElementById('modal-confirmar-actualizacion').classList.remove('hidden');
+}
+
+function confirmarImportInsumos(){
+  if(!importInsumosPendiente) return;
+  const { nuevos, actualizados } = importInsumosPendiente;
+
+  actualizados.forEach(a => {
+    const item = insumos.find(i => i.id === a.id);
+    if(!item) return;
+    item.unidad = a.unidad;
+    item.precio = a.precio;
+    item.cantidadPresentacion = a.cantidadPresentacion;
+    item.precioUnitario = a.precioUnitario;
+  });
+  nuevos.forEach(n => {
+    insumos.push({ id: uid(), nombre: n.nombre, unidad: n.unidad, precio: n.precio, cantidadPresentacion: n.cantidadPresentacion, precioUnitario: n.precioUnitario });
+  });
+
+  guardarInsumos();
+  insumosVisibles = INSUMOS_POR_PAGINA;
+  renderInsumos();
+  if(config.preciosInfluyenCombos){
+    actualizados.forEach(a => recalcularCombosPorInsumo(a.id));
+  }
+
+  mostrarToast(`Excel importado: ${nuevos.length} nuevo${nuevos.length === 1 ? '' : 's'}, ${actualizados.length} actualizado${actualizados.length === 1 ? '' : 's'} ✓`);
+  cancelarImportInsumos();
+}
+
+function cancelarImportInsumos(){
+  importInsumosPendiente = null;
+  document.getElementById('modal-confirmar-actualizacion').classList.add('hidden');
+}
+
 function exportarBackup(){
   const data = {
     tipo: 'backup_presupuestos_agil',
@@ -2910,35 +3152,6 @@ guardarConfig();
 renderTarjetas();
 mostrarOnboardingSiCorresponde();
 mostrarTooltipModoClienteSiCorresponde();
-
-/* =========================================================
-   FAB: ocultar/achicar al scrollear hacia abajo (no tapar contenido)
-========================================================= */
-(function(){
-  const fab = document.getElementById('fab-nuevo');
-  let ultimoScrollY = window.scrollY;
-  let ticking = false;
-
-  function actualizarFab(){
-    const actual = window.scrollY;
-    const bajando = actual > ultimoScrollY + 4;
-    const subiendo = actual < ultimoScrollY - 4;
-    if(bajando && actual > 80){
-      fab.classList.add('fab-oculto');
-    }else if(subiendo || actual < 80){
-      fab.classList.remove('fab-oculto');
-    }
-    ultimoScrollY = actual;
-    ticking = false;
-  }
-
-  window.addEventListener('scroll', function(){
-    if(!ticking){
-      requestAnimationFrame(actualizarFab);
-      ticking = true;
-    }
-  }, { passive: true });
-})();
 
 /* Registro del Service Worker: hace la app instalable ("Agregar a pantalla de inicio")
    y disponible offline. Es aditivo — si falla (ej: abierta como file:// sin servidor,

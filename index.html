@@ -123,6 +123,13 @@
       </div>
     </div>
 
+    <div class="catalogo-toolbar">
+      <button class="btn-toolbar" onclick="exportarInsumosExcel()">⬇ Exportar a Excel</button>
+      <button class="btn-toolbar" onclick="document.getElementById('input-importar-insumos').click()">⬆ Importar desde Excel</button>
+      <input type="file" id="input-importar-insumos" accept=".csv,text/csv" onchange="importarInsumosExcel(event)">
+    </div>
+    <p class="hint-excel">Se actualiza por nombre: no borra ni duplica lo que ya tenés cargado. Al guardar en Excel elegí el formato <b>CSV (delimitado por comas)</b>.</p>
+
     <div class="ticket-input">
       <label for="insumo-quick-entry">Carga y edición rápida por texto</label>
       <textarea id="insumo-quick-entry" placeholder="Ej: Cemento Loma Negra 50kg a 12500&#10;Arena, cambiarlo a Arena Gruesa" rows="2"></textarea>
@@ -151,8 +158,6 @@
   </section>
 
 </main>
-
-<button class="fab" id="fab-nuevo" onclick="abrirModalNuevo()" title="Agregar ítem">+</button>
 
 <!-- ===== FOOTER STICKY (Panel de Cierre) ===== -->
 <footer>

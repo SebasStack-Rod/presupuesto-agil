@@ -211,7 +211,13 @@
     min-height:40px;
   }
   .btn-toolbar:hover{ background:var(--bg); }
-  #input-restaurar{ display:none; }
+  #input-restaurar, #input-importar-insumos{ display:none; }
+  .hint-excel{
+    font-size:12px;
+    color:var(--text-secondary);
+    margin:-4px 0 14px;
+    line-height:1.5;
+  }
 
   .filtro-categorias{
     display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; margin-bottom:12px;
@@ -1173,6 +1179,34 @@
     font-size:11px; font-weight:700; color:var(--text-secondary);
     background:var(--border); padding:2px 8px; border-radius:20px; flex-shrink:0;
   }
+
+  /* ===== IMPORTAR EXCEL: resumen de cambios antes de confirmar ===== */
+  .resumen-import-contadores{
+    display:flex; gap:8px; margin:10px 0 14px; flex-wrap:wrap;
+  }
+  .resumen-import-chip{
+    font-size:12px; font-weight:700; padding:5px 12px; border-radius:20px;
+  }
+  .resumen-import-chip.chip-nuevo{ background:var(--success-soft); color:var(--success-dark); }
+  .resumen-import-chip.chip-actualizado{ background:var(--primary-soft); color:var(--primary); }
+  .resumen-import-chip.chip-sin-cambios{ background:var(--bg); color:var(--text-secondary); }
+  .lista-cambios-import{
+    display:flex; flex-direction:column; gap:8px;
+    max-height:44vh; overflow-y:auto;
+    margin:0 0 6px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:8px;
+  }
+  .fila-cambio-import{
+    padding:10px 12px;
+    border-radius:8px;
+    background:var(--bg);
+  }
+  .fila-cambio-import .fci-nombre{ font-size:13.5px; font-weight:700; color:var(--text); margin-bottom:3px; }
+  .fila-cambio-import .fci-detalle{ font-size:12px; color:var(--text-secondary); }
+  .fila-cambio-import.fci-nuevo{ border-left:3px solid var(--success); }
+  .fila-cambio-import.fci-actualizado{ border-left:3px solid var(--primary); }
 
   /* ===== ONBOARDING ===== */
   .onb-dots{ display:flex; justify-content:center; gap:6px; margin:14px 0 4px; }
